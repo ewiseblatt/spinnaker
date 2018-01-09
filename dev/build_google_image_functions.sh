@@ -183,7 +183,6 @@ function delete_image_if_exists() {
   fi
 }
 
-
 function delete_build_instance() {
   echo "`date`: Cleaning up prototype instance '$PROTOTYPE_INSTANCE'"
   gcloud compute instances delete $PROTOTYPE_INSTANCE \
