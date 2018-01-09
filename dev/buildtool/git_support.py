@@ -741,6 +741,17 @@ class GitRunner(object):
               dir=git_dir, output=stdout))
     return stdout
 
+  def delete_branch_on_origin(self, git_dir, branch):
+    if self.options.git_never_push:
+      logging.warning(
+          'SKIP deleting branch because --git_never_push=true.'
+          '\nCommand would have been: %s',
+          'git -C "{dir}" push origin --delete {branch}'.format(
+              dir=git_dir, branch=branch))
+      return
+    logging.warning('Deleting origin branch="%s" for %s', branch, git_dir)
+    self.check_run(git_dir, 'push origin --delete ' + branch)
+
   def push_branch_to_origin(self, git_dir, branch):
     """Push the given local repository back up to the origin.
 
@@ -750,7 +761,11 @@ class GitRunner(object):
       logging.warning(
           'SKIP pushing branch because --git_never_push=true.'
           '\nCommand would have been: %s',
+<<<<<<< HEAD:dev/buildtool/git_support.py
           'hub -C "{dir}" push origin {branch}'.format(
+=======
+          'git -C "{dir}" push origin {branch}'.format(
+>>>>>>> feat(buildtool): added publish_halyard and publish_spinnaker:dev/buildtool/git_support.py
               dir=git_dir, branch=branch))
       return
 
@@ -758,6 +773,7 @@ class GitRunner(object):
     if in_branch != branch:
       logging.warning('Skipping push %s "%s" to origin because branch is "%s".',
                       git_dir, branch, in_branch)
+<<<<<<< HEAD:dev/buildtool/git_support.py
       return
     self.check_run(git_dir, 'push origin ' + branch)
 
@@ -769,6 +785,19 @@ class GitRunner(object):
           '\nCommand would have been: %s',
           'hub -C "{dir}" push origin {tag}'.format(dir=git_dir, tag=tag))
       return
+=======
+      return
+    self.check_run(git_dir, 'push origin ' + branch)
+
+  def push_tag_to_origin(self, git_dir, tag):
+    """Push the given tag back up to the origin."""
+    if self.options.git_never_push:
+      logging.warning(
+          'SKIP pushing tag because --git_never_push=true.'
+          '\nCommand would have been: %s',
+          'git -C "{dir}" push origin {tag}'.format(dir=git_dir, tag=tag))
+      return
+>>>>>>> feat(buildtool): added publish_halyard and publish_spinnaker:dev/buildtool/git_support.py
 
     logging.debug('Pushing tag "%s" and pushing to origin in %s', tag, git_dir)
     self.check_run(git_dir, 'push origin ' + tag)
@@ -1030,7 +1059,7 @@ class GitRunner(object):
       logging.warning(
           'SKIP creating pull request because --git_never_push=true.'
           '\nCommand would have been: %s',
-          'hub -C "{dir}" pull-request {args} -m {msg!r}'.format(
+          'git -C "{dir}" pull-request {args} -m {msg!r}'.format(
               dir=git_dir, args=' '.join(hub_args), msg=message))
       return
 

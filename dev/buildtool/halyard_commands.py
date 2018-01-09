@@ -72,11 +72,15 @@ class BuildHalyardCommand(GradleCommandProcessor):
     options_copy.bom_path = None
     options_copy.bom_version = None
     self.__build_version = None  # recorded after build
+    self.__versions_url = options.halyard_version_commits_url
+    if not self.__versions_url:
+      self.__versions_url = '{base}/{filename}'.format(
+          base=options.halyard_bucket_base_url,
+          filename=self.HALYARD_VERSIONS_BASENAME)
     super(BuildHalyardCommand, self).__init__(
         factory, options_copy,
         source_repository_names=[SPINNAKER_HALYARD_REPOSITORY_NAME],
         **kwargs)
-    self.gradle.check_debian_options()
 
   def publish_halyard_version_commits(self, repository):
     """Publish the halyard build to the bucket.
@@ -90,13 +94,6 @@ class BuildHalyardCommand(GradleCommandProcessor):
     the 'nightly' build which isnt really nightly just 'last-build',
     which could even be on an older branch than latest.
     """
-    options = self.options
-    versions_url = options.halyard_version_commits_url
-    if not versions_url:
-      versions_url = '{base}/{filename}'.format(
-          base=options.halyard_bucket_base_url,
-          filename=self.HALYARD_VERSIONS_BASENAME)
-
     summary_info = self.source_code_manager.lookup_source_info(repository)
 
     # This is only because we need a file to gsutil cp
@@ -104,33 +101,24 @@ class BuildHalyardCommand(GradleCommandProcessor):
     output_dir = self.get_output_dir()
     tmp_path = os.path.join(output_dir, self.HALYARD_VERSIONS_BASENAME)
 
-    logging.debug('Fetching existing halyard build versions')
-    retcode, stdout = run_subprocess('gsutil cat ' + versions_url)
-    if not retcode:
-      contents = stdout + '\n'
-    else:
-      if stdout.find('No URLs matched') < 0:
-        raise_and_log_error(
-            ExecutionError('No URLs matched', program='gsutil'),
-            'Could not fetch "%s": %s' % (versions_url, stdout))
-      contents = ''
-      logging.warning('%s did not exist. Creating a new one.', versions_url)
-
+    contents = self.load_halyard_version_commits()
     new_entry = '{version}: {commit}\n'.format(
         version=self.__build_version, commit=summary_info.summary.commit_id)
 
-    logging.info('Updating %s with %s', versions_url, new_entry)
+    logging.info('Updating %s with %s', self.__versions_url, new_entry)
     if contents and contents[-1] != '\n':
       contents += '\n'
     contents = contents + new_entry
     with open(tmp_path, 'w') as stream:
       stream.write(contents)
     check_subprocess('gsutil cp {path} {url}'.format(
-        path=tmp_path, url=versions_url))
+        path=tmp_path, url=self.__versions_url))
+    self.__emit_last_commit_entry(new_entry)
+
+  def __emit_last_commit_entry(self, entry):
     last_version_commit_path = os.path.join(
-        output_dir, 'last_version_commit.yml')
-    with open(last_version_commit_path, 'w') as stream:
-      stream.write(new_entry)
+        self.get_output_dir(), 'last_version_commit.yml')
+    write_to_path(entry, last_version_commit_path)
 
   def build_all_halyard_deployments(self, repository):
     """Helper function for building halyard."""
@@ -157,8 +145,44 @@ class BuildHalyardCommand(GradleCommandProcessor):
         '{name} build'.format(name='halyard'), logfile,
         [cmd], cwd=git_dir, env=env)
 
+  def load_halyard_version_commits(self):
+    logging.debug('Fetching existing halyard build versions')
+    retcode, stdout = run_subprocess('gsutil cat ' + self.__versions_url)
+    if not retcode:
+      contents = stdout + '\n'
+    else:
+      if stdout.find('No URLs matched') < 0:
+        raise_and_log_error(
+            ExecutionError('No URLs matched', program='gsutil'),
+            'Could not fetch "%s": %s' % (self.__versions_url, stdout))
+      contents = ''
+      logging.warning(
+          '%s did not exist. Creating a new one.', self.__versions_url)
+    return contents
+
+  def find_commit_version_entry(self, repository):
+    logging.debug('Looking for existing halyard version for this commit.')
+    commit_id = self.git.query_local_repository_commit_id(repository.git_dir)
+    commits = self.load_halyard_version_commits().split('\n')
+    commits.reverse()
+    postfix = ' ' + commit_id
+    for line in commits:
+      if line.endswith(postfix):
+        return line
+    return None
+
   def _do_repository(self, repository):
     """Implements RepositoryCommandProcessor interface."""
+    if self.options.skip_existing:
+      entry = self.find_commit_version_entry(repository)
+      if entry:
+        logging.info('Found existing halyard version "%s"', entry)
+        labels = {'repository': repository.name, 'artifact': 'halyard'}
+        self.metrics.inc_counter('ReuseArtifact', labels,
+                                 'Kept existing desired artifact build.')
+        self.__emit_last_commit_entry(entry)
+        return
+
     if self.gradle.consider_debian_on_bintray(
         repository, build_number=self.options.build_number):
       return

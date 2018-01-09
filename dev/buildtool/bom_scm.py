@@ -19,8 +19,6 @@ import os
 import yaml
 
 from buildtool import (
-    SPINNAKER_RUNNABLE_REPOSITORY_NAMES,
-
     HalRunner,
     SpinnakerSourceCodeManager,
 
@@ -32,8 +30,15 @@ from buildtool import (
     UnexpectedError)
 
 
-SPINNAKER_BOM_REPOSITORY_NAMES = list(SPINNAKER_RUNNABLE_REPOSITORY_NAMES)
-SPINNAKER_BOM_REPOSITORY_NAMES.extend(['spinnaker', 'spinnaker-monitoring'])
+def check_bom_service(bom, service_name):
+  services = bom.get('services', {})
+  entry = services.get(service_name)
+  if entry is None:
+    raise_and_log_error(
+        ConfigError('BOM does not contain service "%s"' % service_name,
+                    cause='BadBom'),
+        'BOM missing "%s": %s' % (service_name, services.keys()))
+  return entry
 
 
 class BomSourceCodeManager(SpinnakerSourceCodeManager):
@@ -45,6 +50,7 @@ class BomSourceCodeManager(SpinnakerSourceCodeManager):
     if hasattr(parser, 'added_bom_scm'):
       return
     parser.added_bom_scm = True
+    SpinnakerSourceCodeManager.add_parser_args(parser, defaults)
     HalRunner.add_parser_args(parser, defaults)
     add_parser_argument(
         parser, 'bom_path', defaults, None,
@@ -85,12 +91,6 @@ class BomSourceCodeManager(SpinnakerSourceCodeManager):
 
     raise_and_log_error(UnexpectedError('Not reachable', cause='NotReachable'))
 
-  @staticmethod
-  def to_service_name(repository):
-    if repository.name == 'spinnaker-monitoring':
-      return 'monitoring-daemon'
-    return repository.name
-
   @property
   def bom(self):
     """Returns the bom being used, if any."""
@@ -109,12 +109,8 @@ class BomSourceCodeManager(SpinnakerSourceCodeManager):
     return None
 
   def determine_origin(self, name):
-    if name == 'spinnaker-monitoring':
-      service_name = 'monitoring-daemon'
-    else:
-      service_name = name
-
-    service = self.__bom['services'][service_name]
+    service_name = self.repository_name_to_service_name(name)
+    service = check_bom_service(self.__bom, service_name)
     if service.get('gitPrefix'):
       prefix = service['gitPrefix']
     else:
@@ -124,7 +120,7 @@ class BomSourceCodeManager(SpinnakerSourceCodeManager):
   def ensure_git_path(self, repository, **kwargs):
     """Make sure repository path is consistent with BOM."""
     check_kwargs_empty(kwargs)
-    service_name = self.to_service_name(repository)
+    service_name = self.repository_name_to_service_name(repository.name)
     if not service_name in self.__bom['services'].keys():
       raise_and_log_error(
           UnexpectedError('"%s" is not a BOM repo' % service_name))
@@ -132,51 +128,54 @@ class BomSourceCodeManager(SpinnakerSourceCodeManager):
     git_dir = repository.git_dir
     have_git_dir = os.path.exists(git_dir)
 
-    service = self.__bom['services'][service_name]
+    service = check_bom_service(self.__bom, service_name)
     commit_id = service['commit']
 
     if not have_git_dir:
       self.git.clone_repository_to_path(repository, commit=commit_id)
 
   def determine_build_number(self, repository):
-    service_name = self.to_service_name(repository)
+    service_name = self.repository_name_to_service_name(repository.name)
     if not service_name in self.__bom['services'].keys():
       raise_and_log_error(
           UnexpectedError('"%s" is not a BOM repo' % service_name))
 
-    service = self.__bom['services'][service_name]
+    service = check_bom_service(self.__bom, service_name)
     build_number = service['version'][service['version'].find('-') + 1:]
     return build_number
 
   def check_repository_is_current(self, repository):
     git_dir = repository.git_dir
-    service_name = self.to_service_name(repository)
+    service_name = self.repository_name_to_service_name(repository.name)
     have_commit = self.git.query_local_repository_commit_id(git_dir)
-    bom_commit = self.__bom['services'][service_name]['commit']
+    bom_commit = check_bom_service(self.__bom, service_name)['commit']
     if have_commit == bom_commit:
       return True
-
-    logging.warning('"%s" is at the wrong commit -- changing to "%s"',
-                    git_dir, bom_commit)
-    self.git.check_run(git_dir, 'checkout ' + bom_commit)
-    return False
-
-  def determine_upstream_url(self, name):
-    # Disable upstrema on BOM urls since we wont be pushing back.
-    return None
+    raise_and_log_error(
+        UnexpectedError(
+            '"%s" is at the wrong commit "%s"' % (git_dir, bom_commit)))
 
   def determine_source_repositories(self):
     """Implements SpinnakerSourceCodeManger interface."""
-    bom = self.__bom
-    git_prefix = bom['artifactSources']['gitPrefix']
-    repositories = []
-    for name, spec in bom['services'].items():
-      if name in ['monitoring-third-party', 'defaultArtifact']:
-        continue
-      if name == 'monitoring-daemon':
-        name = 'spinnaker-monitoring'
+    return self.filter_source_repositories(lambda key, value: True)
 
-      prefix = spec['gitPrefix'] if 'gitPrefix' in spec else git_prefix
-      origin = '%s/%s' % (prefix, name)
-      repositories.append(self.make_repository_spec(name, origin=origin))
+  def filter_source_repositories(self, entry_filter):
+    bom = self.__bom
+    prototype = {
+        'gitPrefix': bom['artifactSources']['gitPrefix']
+    }
+
+    repositories = []
+    for service_name, spec in bom['services'].items():
+      if service_name in ['monitoring-third-party', 'defaultArtifact']:
+        continue
+      repo_name = self.service_name_to_repository_name(service_name)
+
+      entry = dict(prototype)
+      entry.update(spec)
+      if not entry_filter(repo_name, entry):
+        continue
+      origin = '%s/%s' % (entry['gitPrefix'], repo_name)
+      repositories.append(
+          self.make_repository_spec(repo_name, origin=origin))
     return repositories

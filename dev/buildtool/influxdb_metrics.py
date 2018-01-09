@@ -33,8 +33,8 @@ To create a database:
 
 import datetime
 import logging
+import re
 import urllib2
-
 
 from buildtool import add_parser_argument
 from buildtool.inmemory_metrics import InMemoryMetricsRegistry
@@ -67,6 +67,11 @@ class InfluxDbMetricsRegistry(InMemoryMetricsRegistry):
         help='Reiterate gauge values for the specified period of seconds.'
              ' This is because when they get chunked into time blocks, the'
              'values become lost, in particular settling back to 0.')
+    add_parser_argument(
+        parser, 'influxdb_add_context_labels', defaults, None,
+        help='A comma-separated list of additional name=value'
+             ' labels to add to each event to associate them together.'
+             ' (e.g. xRelease=release-1.2.x)')
 
   def __init__(self, *pos_args, **kwargs):
     super(InfluxDbMetricsRegistry, self).__init__(*pos_args, **kwargs)
@@ -76,6 +81,25 @@ class InfluxDbMetricsRegistry(InMemoryMetricsRegistry):
         'TIMER': self.__export_timer_points,
     }
     self.__recent_gauges = set([])
+    matcher = re.compile(r'(\w+)=(.*)')
+    inject_bindings = {}
+    for binding in (self.options.influxdb_add_context_labels or '').split(','):
+      if not binding:
+        continue
+      try:
+        match = matcher.match(binding)
+        inject_bindings[match.group(1)] = match.group(2)
+      except Exception as ex:
+        raise ValueError('Invalid influxdb_add_context_labels binding "%s": %s',
+                         binding, ex)
+
+    self.__inject_labels = ','.join(['%s=%s' % (key, value)
+                                     for key, value in inject_bindings.items()
+                                     if value != ''])
+    if self.__inject_labels:
+      logging.debug('Injecting additional metric labels %s',
+                    self.__inject_labels)
+      self.__inject_labels += ','
 
   def _do_flush_final_metrics(self):
     """Implements interface."""
@@ -120,9 +144,10 @@ class InfluxDbMetricsRegistry(InMemoryMetricsRegistry):
       logging.error('Cannot write metrics to %s:\n%s', url, ioex)
 
   def __to_label_text(self, metric):
-    return ','.join(['%s=%s' % (key, value)
-                     for key, value in metric.labels.items()
-                     if value != ''])
+    metric_label_text = ','.join(['%s=%s' % (key, value)
+                                  for key, value in metric.labels.items()
+                                  if value != ''])
+    return self.__inject_labels + metric_label_text
 
   def __reiterate_recent_gauges(self, gauges, payload):
     now = datetime.datetime.utcnow()

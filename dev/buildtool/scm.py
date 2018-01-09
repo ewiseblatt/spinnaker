@@ -19,11 +19,13 @@ the git repositories for tagging and annotations.
 """
 
 from multiprocessing.pool import ThreadPool
+from threading import Lock
 
 import collections
 import logging
 import os
 import yaml
+
 
 # pylint: disable=relative-import
 from buildtool import (
@@ -32,9 +34,12 @@ from buildtool import (
     GitRunner,
     RepositorySummary,
 
+    add_parser_argument,
     check_kwargs_empty,
+    check_path_exists,
     raise_and_log_error,
     write_to_path,
+    ConfigError,
     UnexpectedError)
 
 
@@ -77,12 +82,20 @@ class SpinnakerSourceCodeManager(object):
   AUTO = '_auto_'
 
   @staticmethod
+  def all_filter(any_name, any_entry):
+    return True
+
+  @staticmethod
   def add_parser_args(parser, defaults):
     """Add standard parser arguments used by SourceCodeManager."""
     if hasattr(parser, 'added_scm'):
       return
     parser.added_scm = True
     GitRunner.add_parser_args(parser, defaults)
+    add_parser_argument(
+        parser, 'scm_repository_spec_path', defaults,
+        os.path.join(os.path.dirname(__file__), 'scm_repositories.yml'),
+        help='Path to yaml file specifying soruce code manager repositories.')
 
   @property
   def git(self):
@@ -100,6 +113,12 @@ class SpinnakerSourceCodeManager(object):
     """
     return self.__root_source_dir
 
+  @property
+  def source_repository_database(self):
+    if self.__source_repository_database is None:
+      self.__init_database()
+    return self.__source_repository_database
+
   def __init__(self, options, root_source_dir, **kwargs):
     self.__max_threads = kwargs.pop('max_threads', 100)
     self.__add_upstream = kwargs.pop('attach_upstream', False)
@@ -108,9 +127,64 @@ class SpinnakerSourceCodeManager(object):
     self.__options = options
     self.__git = GitRunner(options)
     self.__root_source_dir = root_source_dir
-    self.__github_owner = (options.github_owner
-                           if hasattr(options, 'github_owner')
-                           else None)
+    self.__source_repository_database = None
+    self.__repo_name_to_service_name = {}
+    self.__service_name_to_repo_name = {}
+    self.__source_repository_database_mutex = Lock()
+
+  def __init_database(self):
+    with self.__source_repository_database_mutex:
+      if self.__source_repository_database is not None:
+        return
+
+      check_path_exists(self.options.scm_repository_spec_path,
+                        "scm_repository_spec_path")
+      with open(self.options.scm_repository_spec_path, 'r') as stream:
+        db = yaml.load(stream.read())
+        self.__source_repository_database = db
+        service_to_repo = {}
+        repo_to_service = {}
+        for repo_name, entry in db['repositories'].items():
+          entry = entry or {}
+          service_name = entry.get('service_name', repo_name)
+          repo_to_service[repo_name] = service_name
+          service_to_repo[service_name] = repo_name
+        self.__repo_name_to_service_name = repo_to_service
+        self.__service_name_to_repo_name = service_to_repo
+
+  def service_name_to_repository_name(self, service_name):
+    if self.__source_repository_database is None:
+      self.__init_database()
+
+    repo_name = self.__service_name_to_repo_name.get(service_name)
+    if not repo_name:
+      raise_and_log_error(
+          ConfigError('Unknown service_name="%s"' % service_name,
+                      cause='ServiceName'))
+    return repo_name
+
+  def repository_name_to_service_name(self, repository_name):
+    if self.__source_repository_database is None:
+      self.__init_database()
+
+    service_name = self.__repo_name_to_service_name.get(repository_name)
+    if not service_name:
+      raise_and_log_error(
+          ConfigError('Unknown repository_name="%s"' % repository_name,
+                      cause='RepositoryName'))
+    return service_name
+
+  def repository_name_to_database_entry(self, repository_name):
+    if self.__source_repository_database is None:
+      self.__init_database()
+
+    repositories = self.__source_repository_database.get('repositories', {})
+    entry = repositories.get(repository_name)
+    if not entry:
+      raise_and_log_error(
+          ConfigError('Unknown repository_name="%s"' % repository_name,
+                      cause='RepositoryName'))
+    return entry
 
   def check_repository_is_current(self, repository):
     raise NotImplementedError(self.__class__.__name__)
@@ -121,20 +195,6 @@ class SpinnakerSourceCodeManager(object):
   def determine_origin(self, name):
     """Determine the origin URL for the given repository name."""
     raise NotImplementedError(self.__class__.__name__)
-
-  def determine_owner_origin_or_none(self, name):
-    """Determine the origin to use for the given repository."""
-    if not self.__github_owner:
-      return None
-
-    github_owner = self.__github_owner
-    if github_owner in ('upstream', 'default'):
-      upstream_owner = 'spinnaker' if name not in ('citest') else 'google'
-      github_owner = upstream_owner
-
-    return (self.__git.make_ssh_url('github.com', github_owner, name)
-            if self.__options.github_pull_ssh
-            else self.__git.make_https_url('github.com', github_owner, name))
 
   def make_repository_spec(self, name, **kwargs):
     """Create GitRepositorySpec based on the name and configuration.
@@ -167,10 +227,9 @@ class SpinnakerSourceCodeManager(object):
     return GitRepositorySpec(
         name, origin=origin, upstream=upstream, git_dir=git_dir)
 
-  def determine_upstream_url(self, name):
-    upstream_owner = 'spinnaker' if name not in ('citest') else 'google'
-    return 'https://github.com/{upstream}/{name}'.format(
-        upstream=upstream_owner, name=name)
+  def determine_upstream_url(self, _):
+    # Disable upstream by default.
+    return None
 
   def ensure_git_path(self, repository, **kwargs):
     """Make sure the repository is checked out.

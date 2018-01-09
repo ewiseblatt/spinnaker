@@ -41,6 +41,11 @@ class SimpleNamespace(object):
     self.github_owner = 'test_github_owner'
     self.github_pull_ssh = False
     self.output_dir = '/tmp'
+<<<<<<< HEAD
+=======
+    self.scm_repository_spec_path = os.path.join(
+        os.path.dirname(__file__), 'test_scm_repositories.yml')
+>>>>>>> feat(buildtool): added publish_halyard and publish_spinnaker
 
 
 class TestRepositoryCommand(RepositoryCommandProcessor):

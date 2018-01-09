@@ -21,13 +21,80 @@ import yaml
 
 from buildtool import (
     BomSourceCodeManager,
+    BranchSourceCodeManager,
     CommandProcessor,
     CommandFactory,
+    RepositoryCommandFactory,
+    RepositoryCommandProcessor,
     GitRunner,
     HalRunner,
 
     check_options_set,
-    write_to_path)
+    write_to_path,
+    raise_and_log_error,
+    ConfigError)
+
+
+class InitiateReleaseBranchFactory(RepositoryCommandFactory):
+  def __init__(self, **kwargs):
+    super(InitiateReleaseBranchFactory, self).__init__(
+        'new_release_branch', InitiateReleaseBranchCommand,
+        'Create a new spinnaker release branch in each of the repos.',
+        BranchSourceCodeManager,
+        scm_entry_filter=BranchSourceCodeManager.all_filter,
+        **kwargs)
+
+  def init_argparser(self, parser, defaults):
+    GitRunner.add_parser_args(parser, defaults)
+    GitRunner.add_publishing_parser_args(parser, defaults)
+    super(InitiateReleaseBranchFactory, self).init_argparser(parser, defaults)
+    self.add_argument(
+        parser, 'skip_existing', defaults, False, type=bool,
+        help='Leave the existing tag if found in a repository.')
+    self.add_argument(
+        parser, 'delete_existing', defaults, False, type=bool,
+        help='Delete the existing tag if found in a repository.')
+    self.add_argument(
+        parser, 'spinnaker_version', defaults, None,
+        help='The version branch name should be "release-<num>.<num>.x"')
+
+
+class InitiateReleaseBranchCommand(RepositoryCommandProcessor):
+  def __init__(self, factory, options, **kwargs):
+    super(InitiateReleaseBranchCommand, self).__init__(
+        factory, options, **kwargs)
+    check_options_set(options, ['spinnaker_version'])
+    self.__git = GitRunner(options)
+
+  def _do_repository(self, repository):
+    git_dir = repository.git_dir
+    branch = self.options.spinnaker_version
+
+    logging.debug('Checking for branch="%s" in "%s"', branch, git_dir)
+    remote_branches = [
+        line.strip()
+        for line in self.__git.check_run(git_dir, 'branch -r').split('\n')]
+
+    if 'origin/' + branch in remote_branches:
+      if self.options.skip_existing:
+        logging.info('Branch "%s" already exists in "%s" -- skip',
+                     branch, repository.origin)
+        return
+      elif self.options.delete_existing:
+        logging.warning('Branch "%s" already exists in "%s" -- delete',
+                        branch, repository.origin)
+        self.__git.delete_branch_on_origin(git_dir, branch)
+      else:
+        raise_and_log_error(
+            ConfigError(
+                'Branch "{branch}" already exists in "{repo}"'.format(
+                    branch=branch, repo=repository.name),
+                cause='branch_exists'))
+
+    logging.info('Creating and pushing branch "%s" to "%s"',
+                 branch, repository.origin)
+    self.__git.check_run(git_dir, 'checkout -b ' + branch)
+    self.__git.push_branch_to_origin(git_dir, branch)
 
 
 class PublishSpinnakerFactory(CommandFactory):
@@ -141,4 +208,5 @@ class PublishSpinnakerCommand(CommandProcessor):
 
 
 def register_commands(registry, subparsers, defaults):
+  InitiateReleaseBranchFactory().register(registry, subparsers, defaults)
   PublishSpinnakerFactory().register(registry, subparsers, defaults)
