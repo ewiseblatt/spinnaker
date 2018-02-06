@@ -45,6 +45,7 @@ class BomSourceCodeManager(SpinnakerSourceCodeManager):
     if hasattr(parser, 'added_bom_scm'):
       return
     parser.added_bom_scm = True
+    HalRunner.add_parser_args(parser, defaults)
     add_parser_argument(
         parser, 'bom_path', defaults, None,
         help='Use the sources specified in the BOM path.')

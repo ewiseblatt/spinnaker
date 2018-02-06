@@ -210,7 +210,8 @@ def main():
           'image',
           'rpm',
           'source',
-          'spinnaker'
+          'spinnaker',
+          'inspection',
       ]]
 
   GitRunner.stash_and_clear_auth_env_vars()
