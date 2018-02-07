@@ -1,0 +1,60 @@
+default_origin_hostname: github.com
+default_git_owner: spinnaker
+
+repositories:
+  clouddriver:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-clouddriver
+
+  deck:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-deck
+
+  echo:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-echo
+
+  fiat:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-fiat
+
+  front50:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-front50
+
+  gate:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-gate
+
+  igor:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-igor
+
+  orca:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-orca
+
+  rosco:
+    in_bom: true
+    halconfig_root: ./
+    debian_name: spinnaker-rosco
+
+  spinnaker-monitoring:
+    in_bom: true
+    halconfig_root: ./spinnaker-monitoring-daemon
+    service_name: monitoring-daemon
+    debian_name: spinnaker-monitoring-daemon
+
+  spinnaker:
+  spinnaker.github.io:
+  halyard:
+    debian_name: spinnaker-halyard
+

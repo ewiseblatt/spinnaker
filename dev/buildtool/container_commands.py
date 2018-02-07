@@ -76,9 +76,7 @@ class BuildContainerCommand(GradleCommandProcessor):
   def __check_gcb_image(self, repository, version):
     """Determine if gcb image already exists."""
     options = self.options
-    image_name = repository.name
-    if image_name == 'spinnaker-monitoring':
-      image_name = 'monitoring-daemon'
+    image_name = self.scm.repository_name_to_service_name(repository.name)
     command = ['gcloud', '--account', options.gcb_service_account,
                'container', 'images', 'list-tags',
                options.docker_registry + '/' + image_name,

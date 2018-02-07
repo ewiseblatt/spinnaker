@@ -36,6 +36,12 @@ class WaitForDebiansCommand(RepositoryCommandProcessor):
   """
 
   def __init__(self, factory, options, **kwargs):
+    def entry_filter(name, entry):
+      if entry.get('in_bom'):
+        return True
+      if name == 'halyard':
+        return True
+      return False
     super(WaitForDebiansCommand, self).__init__(factory, options, **kwargs)
     bom = self.source_code_manager.bom
     self.__bintray_url = bom['artifactSources']['debianRepository']
@@ -44,22 +50,13 @@ class WaitForDebiansCommand(RepositoryCommandProcessor):
   def ensure_local_repository(self, repository):
     pass
 
-  def filter_repositories(self, source_repositories):
-    repositories = super(WaitForDebiansCommand, self).filter_repositories(
-        source_repositories)
-    if self.options.halyard_version:
-      repositories = list(repositories)
-      repositories.append(GitRepositorySpec('halyard'))
-
-    return repositories
-
   def _do_repository(self, repository):
     decorator = 'spinnaker-' if repository.name != 'spinnaker' else ''
     if repository.name == 'halyard':
       name = 'halyard'
       name_version = 'halyard_' + self.options.halyard_version
     else:
-      name = BomSourceCodeManager.to_service_name(repository)
+      name = self.scm.repository_name_to_service_name(repository.name)
       entry = self.source_code_manager.bom['services'][name]
       name_version = name + '_' + entry['version']
 

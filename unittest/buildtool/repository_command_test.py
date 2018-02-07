@@ -22,36 +22,25 @@ import unittest
 from buildtool import (
     RepositoryCommandProcessor,
     RepositoryCommandFactory,
-    BranchSourceCodeManager,
-    MetricsManager)
+    BranchSourceCodeManager)
 
 import custom_test_command
 
+from test_util import (
+    BaseGitRepoTestFixture,
+    init_runtime)
 
-TEST_INPUT_DIR = '/test/root/path/for/local/repos'
-TEST_REPOSITORY_NAMES = ['repo-one', 'repo-two']
 
 COMMAND = custom_test_command.COMMAND
 FAILURE_COMMAND_NAME = 'test_command_failure'
-
-class SimpleNamespace(object):
-  def __init__(self):
-    self.command = 'test_command'
-    self.git_branch = 'test_branch'
-    self.github_owner = 'test_github_owner'
-    self.github_pull_ssh = False
-    self.output_dir = '/tmp'
-<<<<<<< HEAD
-=======
-    self.scm_repository_spec_path = os.path.join(
-        os.path.dirname(__file__), 'test_scm_repositories.yml')
->>>>>>> feat(buildtool): added publish_halyard and publish_spinnaker
+ALL_BOM_REPO_NAMES = ['normal-test-service', 'outlier-test-repo']
 
 
 class TestRepositoryCommand(RepositoryCommandProcessor):
-  def __init__(self, factory, options, pos_arg, **kwargs):
+  def __init__(self, factory, options, pos_arg,
+               scm_entry_filter=None, **kwargs):
     super(TestRepositoryCommand, self).__init__(
-        factory, options, source_repository_names=TEST_REPOSITORY_NAMES)
+        factory, options, scm_entry_filter=scm_entry_filter)
     self.test_init_args = (factory, options, pos_arg, kwargs)
     self.preprocessed = False
     self.postprocess_dict = None
@@ -90,16 +79,29 @@ class TestRepositoryCommand(RepositoryCommandProcessor):
     return 'TEST {0}'.format(repository.name)
 
 
-class RepositoryCommandProcessorTest(unittest.TestCase):
-  def do_test_command(self, options, command_name):
-    options.input_dir = TEST_INPUT_DIR
+class RepositoryCommandProcessorTest(BaseGitRepoTestFixture):
+  def make_test_options(self):
+    class Options(object):
+      pass
+    options = Options()
+    options.command = 'test_command'
+    options.git_branch = 'test_branch'
+    options.github_owner = 'test_github_owner'
+    options.github_pull_ssh = False
     options.only_repositories = None
+    options.input_dir = os.path.join(self.base_temp_dir, 'input_dir')
+    options.output_dir = os.path.join(self.base_temp_dir, 'output_dir')
+    options.scm_repository_spec_path = os.path.join(
+        os.path.dirname(__file__), 'standard_test_repositories.yml')
+    return options
 
+  def do_test_command(self, options, command_name):
     init_dict = {'a': 'A', 'b': 'B'}
     factory = RepositoryCommandFactory(
         command_name, TestRepositoryCommand, 'A test command.',
-        BranchSourceCodeManager,
-        123, **init_dict)
+        BranchSourceCodeManager, 123,
+        scm_entry_filter=BranchSourceCodeManager.in_bom_filter,
+        **init_dict)
 
     # Test construction
     command = factory.make_command(options)
@@ -108,10 +110,12 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
     self.assertFalse(command.preprocessed)
     self.assertEquals(factory, command.factory)
     self.assertEquals(factory.name, command.name)
-    self.assertEquals([command.source_code_manager.make_repository_spec(name)
-                       for name in TEST_REPOSITORY_NAMES],
-                      command.source_repositories)
-    self.assertEquals(os.path.join(TEST_INPUT_DIR, command_name),
+    key_func = lambda repo: repo.name
+    expect_list = [command.source_code_manager.make_repository_spec(name)
+                   for name in ALL_BOM_REPO_NAMES]
+    self.assertEquals(sorted(expect_list, key=key_func),
+                      sorted(command.source_repositories, key=key_func))
+    self.assertEquals(os.path.join(options.input_dir, command_name),
                       command.source_code_manager.root_source_dir)
 
     # Test invocation
@@ -123,7 +127,7 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
       self.assertEquals({'foo': 'bar'}, command())
       self.assertEquals(command.postprocess_dict,
                         {name: 'TEST ' + name
-                         for name in TEST_REPOSITORY_NAMES})
+                         for name in ALL_BOM_REPO_NAMES})
 
     self.assertTrue(command.preprocessed)
     self.assertEquals(set(command.source_repositories), command.ensured)
@@ -133,7 +137,7 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
 
   def test_concurrent_command(self):
     test_command_name = 'concurrent_command'
-    options = SimpleNamespace()
+    options = self.options
     options.one_at_a_time = False
     options.command = test_command_name
     command = self.do_test_command(options, test_command_name)
@@ -161,7 +165,7 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
          for metric in family.instance_list
          if metric.labels.get('command') == test_command_name])
     self.assertEquals(2, len(repository_names))
-    self.assertEquals(repository_names, set(TEST_REPOSITORY_NAMES))
+    self.assertEquals(repository_names, set(ALL_BOM_REPO_NAMES))
     for metric in family.instance_list:
       self.assertEquals(family, metric.family)
       self.assertEquals(outcome_name, metric.name)
@@ -170,7 +174,7 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
 
   def test_serialized_command(self):
     test_command_name = 'serialized_command'
-    options = SimpleNamespace()
+    options = self.options
     options.one_at_a_time = True
     options.command = test_command_name
     command = self.do_test_command(options, test_command_name)
@@ -179,7 +183,7 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
 
   def test_failed_command(self):
     test_command_name = FAILURE_COMMAND_NAME
-    options = SimpleNamespace()
+    options = self.options
     options.one_at_a_time = False
     options.command = test_command_name
     command = self.do_test_command(options, test_command_name)
@@ -200,7 +204,7 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
             for metric in family.instance_list
             if metric.labels.get('command') == test_command_name])
         self.assertEquals(2, len(repository_names))
-        self.assertEquals(repository_names, set(TEST_REPOSITORY_NAMES))
+        self.assertEquals(repository_names, set(ALL_BOM_REPO_NAMES))
 
       found = False
       for metric in family.instance_list:
@@ -212,21 +216,6 @@ class RepositoryCommandProcessorTest(unittest.TestCase):
         self.assertEquals(1, metric.count)
         self.assertEquals(False, metric.labels.get('success'))
       self.assertTrue(found)
-
-def init_runtime():
-  logging.basicConfig(
-      format='%(levelname).1s %(asctime)s.%(msecs)03d %(message)s',
-      datefmt='%H:%M:%S',
-      level=logging.DEBUG)
-
-  class Options(object):
-    pass
-  options = Options()
-  options.metric_name_scope = 'unittest'
-  options.monitoring_flush_frequency = -1
-  options.monitoring_system = 'file'
-  options.monitoring_enabled = False
-  MetricsManager.startup_metrics(options)
 
 
 if __name__ == '__main__':

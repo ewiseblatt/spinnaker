@@ -23,8 +23,6 @@ import os
 import re
 
 from buildtool import (
-    SPINNAKER_RUNNABLE_REPOSITORY_NAMES,
-
     BomSourceCodeManager,
     RepositoryCommandFactory,
     RepositoryCommandProcessor,
@@ -40,6 +38,17 @@ from buildtool import (
     raise_and_log_error,
     ConfigError,
     UnexpectedError)
+
+
+# These would be required if running from source code
+SPINNAKER_RUNNABLE_REPOSITORY_NAMES = [
+    'clouddriver',
+    'deck',
+    'echo', 'fiat', 'front50',
+    'gate', 'igor', 'orca', 'rosco']
+
+SPINNAKER_BOM_REPOSITORY_NAMES = list(SPINNAKER_RUNNABLE_REPOSITORY_NAMES)
+SPINNAKER_BOM_REPOSITORY_NAMES.extend(['spinnaker', 'spinnaker-monitoring'])
 
 
 # TODO(ewiseblatt): 20180203
@@ -106,7 +115,7 @@ class BuildGceComponentImages(RepositoryCommandProcessor):
     bom = self.source_code_manager.bom
     dependencies = bom['dependencies']
     services = bom['services']
-    service_name = BomSourceCodeManager.to_service_name(repository)
+    service_name = self.scm.repository_name_to_service_name(repository.name)
     if service_name in dependencies:
       build_version = dependencies[service_name]['version']
     else:
@@ -264,12 +273,6 @@ class BuildGceComponentImagesFactory(RepositoryCommandFactory):
         parser, 'publish_gce_image_script', defaults, publish_image_sh,
         help='Script for publishing images to a project.')
 
-
-    self.add_argument(
-        parser, 'github_owner', defaults, None,
-        help='Github repository owner to clone install scripts from.'
-             ' If none, then use the source repo origin that this script'
-             ' is running from.')
     self.add_argument(
         parser, 'git_branch', defaults, None,
         help='Github branch to get install scripts from.'

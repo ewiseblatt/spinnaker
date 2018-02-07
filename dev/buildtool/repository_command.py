@@ -79,12 +79,14 @@ class RepositoryCommandProcessor(CommandProcessor):
   @property
   def source_repositories(self):
     if self.__source_repositories is None:
-      self.__source_repositories = self.filter_repositories(
-          self.__scm.determine_source_repositories())
+      self.__source_repositories = self.__scm.determine_source_repositories()
     return self.__source_repositories
 
   def __init__(self, factory, options, **kwargs):
+    scm_entry_filter = kwargs.pop('scm_entry_filter', None)
     source_repo_names = kwargs.pop('source_repository_names', None)
+    assert not (scm_entry_filter and source_repo_names)
+
     max_threads = kwargs.pop('max_threads', 64)
     if options.one_at_a_time:
       logging.debug('Limiting %s to one thread.', factory.name)
@@ -95,31 +97,33 @@ class RepositoryCommandProcessor(CommandProcessor):
     self.__scm = factory.make_scm(options, self.get_input_dir(),
                                   max_threads=max_threads)
 
-    self.__source_repositories = None
     if source_repo_names:
       # filter needs the options, so this is after our super init call.
       if self.options.only_repositories:
         only_names = self.options.only_repositories.split(',')
       else:
         only_names = source_repo_names
-      self.__source_repositories = self.filter_repositories(
-          [self.__scm.make_repository_spec(name)
-           for name in source_repo_names
-           if name in only_names])
+      self.__source_repositories = [
+          self.__scm.make_repository_spec(name)
+          for name in source_repo_names
+          if name in only_names]
+      return
+
+    if self.options.only_repositories:
+      all_names = self.options.only_repositories.split(',')
+      name_filter = lambda name: name in all_names
+    else:
+      name_filter = lambda name: True
+    if not scm_entry_filter:
+      scm_entry_filter = lambda name, entry: True
+    combo_filter = (lambda key, data: name_filter(key)
+                    and scm_entry_filter(key, data))
+    self.__source_repositories = self.__scm.filter_source_repositories(
+        combo_filter)
 
   def ensure_local_repository(self, repository):
     """Prepare the repository.git_dir."""
     self.__scm.ensure_local_repository(repository)
-
-  def filter_repositories(self, source_repositories):
-    """Filter a list of source_repositories using option constraints."""
-    # pylint: disable=unused-argument
-    if not self.options.only_repositories:
-      return source_repositories
-
-    repo_filter = self.options.only_repositories.split(',')
-    return [repository for repository in source_repositories
-            if repository.name in repo_filter]
 
   def _do_command(self):
     """Implements CommandProcessor interface.

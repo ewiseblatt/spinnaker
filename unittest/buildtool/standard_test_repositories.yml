@@ -1,0 +1,15 @@
+default_origin_hostname: test-gitserver
+default_git_owner: test-owner
+
+repositories:
+  normal-test-service:
+    in_bom: true
+
+  outlier-test-repo:
+    in_bom: true
+    origin_hostname: outlier-gitserver
+    owner: outlier-owner
+    service_name: outlier-test-service
+
+  extra-test-repo:
+

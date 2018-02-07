@@ -27,9 +27,6 @@ import buildtool.image_commands
 from buildtool import (
     DEFAULT_BUILD_NUMBER,
 
-    SPINNAKER_BOM_REPOSITORY_NAMES,
-    SPINNAKER_RUNNABLE_REPOSITORY_NAMES,
-
     BomSourceCodeManager,
     BranchSourceCodeManager,
     RepositoryCommandFactory,
@@ -65,14 +62,14 @@ class BomBuilder(object):
   """Helper class for BuildBomCommand that constructs the bom specification."""
 
   @staticmethod
-  def new_from_bom(options, bom):
-    return BomBuilder(options, base_bom=bom)
+  def new_from_bom(options, scm, bom):
+    return BomBuilder(options, scm, base_bom=bom)
 
   @property
   def base_bom(self):
     return self.__base_bom
 
-  def __init__(self, options, base_bom=None):
+  def __init__(self, options, scm, base_bom=None):
     """Construct new builder.
 
     Args:
@@ -81,6 +78,7 @@ class BomBuilder(object):
                       only a subset of entires are updated within t.
     """
     self.__options = options
+    self.__scm = scm
     self.__services = {}
     self.__repositories = {}
     self.__base_bom = base_bom or {}
@@ -106,7 +104,7 @@ class BomBuilder(object):
         'version': source_info.to_build_version()
     }
 
-    service_name = BomSourceCodeManager.to_service_name(repository)
+    service_name = self.__scm.repository_name_to_service_name(repository.name)
     self.__services[service_name] = version_info
     self.__repositories[service_name] = repository
     if service_name == 'monitoring-daemon':
@@ -217,7 +215,7 @@ class BuildBomCommand(RepositoryCommandProcessor):
     if base_bom:
       logging.info('Creating new bom based on version "%s"',
                    base_bom.get('version', 'UNKNOWN'))
-    self.__builder = BomBuilder(self.options, base_bom=base_bom)
+    self.__builder = BomBuilder(self.options, self.scm, base_bom=base_bom)
 
   def _do_repository(self, repository):
     source_info = self.scm.lookup_source_info(repository)
@@ -238,7 +236,7 @@ class BuildBomCommandFactory(RepositoryCommandFactory):
     super(BuildBomCommandFactory, self).__init__(
         'build_bom', BuildBomCommand, 'Build a BOM file.',
         BranchSourceCodeManager,
-        source_repository_names=SPINNAKER_BOM_REPOSITORY_NAMES,
+        scm_entry_filter=BranchSourceCodeManager.in_bom_filter,
         **kwargs)
 
   def init_argparser(self, parser, defaults):
@@ -322,7 +320,7 @@ class PublishBomCommand(RepositoryCommandProcessor):
     """Publish each of the halconfigs for the bom at the given path."""
     def publish_repo_config(repository):
       """Helper function to publish individual repository."""
-      name = BomSourceCodeManager.to_service_name(repository)
+      name = self.scm.repository_name_to_service_name(repository.name)
       config_dir = os.path.join(self.get_output_dir(), 'halconfig', name)
       if not os.path.exists(config_dir):
         logging.warning('No profiles for %s', name)
@@ -339,20 +337,13 @@ class PublishBomCommand(RepositoryCommandProcessor):
 
   def __collect_halconfig_files(self, repository):
     """Gets the component config files and writes them into the output_dir."""
-    name = repository.name
-    if (name not in SPINNAKER_BOM_REPOSITORY_NAMES
-        or name in ['spinnaker']):
-      logging.debug('%s does not use config files -- skipping', name)
+    entry = self.scm.repository_name_to_database_entry(repo_name)
+    if not entry.get('halconfig_root'):
+      logging.debug('%s does not use config files -- skipping', repository.name)
       return
 
-    if name == 'spinnaker-monitoring':
-      config_root = os.path.join(
-          repository.git_dir, 'spinnaker-monitoring-daemon')
-    else:
-      config_root = repository.git_dir
-
-
-    service_name = BomSourceCodeManager.to_service_name(repository)
+    config_root = os.path.join(repository.git_dir, entry['halconfig_root'])
+    service_name = self.scm.repository_name_to_service_name(repository.name)
     target_dir = os.path.join(self.get_output_dir(), 'halconfig', service_name)
     ensure_dir_exists(target_dir)
 
@@ -385,7 +376,7 @@ class PublishBomCommandFactory(RepositoryCommandFactory):
     super(PublishBomCommandFactory, self).__init__(
         'publish_bom', PublishBomCommand, 'Publish a BOM file to Halyard.',
         BomSourceCodeManager,
-        source_repository_names=SPINNAKER_BOM_REPOSITORY_NAMES,
+        scm_entry_filter=BomSourceCodeManager.all_filter,
         **kwargs)
 
   def init_argparser(self, parser, defaults):

@@ -2,16 +2,8 @@
 
 # pylint: disable=wrong-import-position
 
-# These would be required if running from source code
-SPINNAKER_RUNNABLE_REPOSITORY_NAMES = [
-    'clouddriver',
-    'deck',
-    'echo', 'fiat', 'front50',
-    'gate', 'igor', 'orca', 'rosco']
-
 SPINNAKER_HALYARD_REPOSITORY_NAME = 'halyard'
 SPINNAKER_GITHUB_IO_REPOSITORY_NAME = 'spinnaker.github.io'
-SPINNAKER_TESTING_REPOSITORY_NAMES = ['spinnaker', 'citest']
 
 
 from buildtool.util import (
@@ -67,7 +59,6 @@ from buildtool.scm import (
     SpinnakerSourceCodeManager)
 
 from buildtool.bom_scm import (
-    SPINNAKER_BOM_REPOSITORY_NAMES,
     BomSourceCodeManager)
 
 from buildtool.branch_scm import (

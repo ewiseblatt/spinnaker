@@ -20,8 +20,6 @@ import shutil
 
 from buildtool import (
     DEFAULT_BUILD_NUMBER,
-    SPINNAKER_BOM_REPOSITORY_NAMES,
-    SPINNAKER_HALYARD_REPOSITORY_NAME,
 
     BranchSourceCodeManager,
     RepositoryCommandFactory,
@@ -37,10 +35,8 @@ class FetchSourceCommand(RepositoryCommandProcessor):
   def __init__(self, factory, options):
     """Implements CommandProcessor interface."""
 
-    all_names = list(SPINNAKER_BOM_REPOSITORY_NAMES)
-    all_names.append(SPINNAKER_HALYARD_REPOSITORY_NAME)
     super(FetchSourceCommand, self).__init__(
-        factory, options, source_repository_names=all_names)
+        factory, options, scm_entry_filter=BranchSourceCodeManager.all_filter)
 
   def ensure_local_repository(self, repository):
     """Implements RepositoryCommandProcessor interface."""
@@ -99,7 +95,7 @@ class ExtractSourceInfoCommandFactory(RepositoryCommandFactory):
         'extract_source_info', ExtractSourceInfoCommand,
         'Get the repository metadata and establish a build number.',
         BranchSourceCodeManager,
-        source_repository_names=SPINNAKER_BOM_REPOSITORY_NAMES)
+        scm_entry_filter=BranchSourceCodeManager.in_bom_filter)
 
   def init_argparser(self, parser, defaults):
     super(ExtractSourceInfoCommandFactory, self).init_argparser(

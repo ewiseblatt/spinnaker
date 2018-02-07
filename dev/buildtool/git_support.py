@@ -564,6 +564,11 @@ class GitRunner(object):
         help='If True, github pull origin uses ssh rather than https.'
              ' Pulls are https by default since the standard repos are public.')
     add_parser_argument(
+        parser, 'github_filesystem_root', defaults, None,
+        help='If set, then use this file path as the base origin root where'
+             ' all the git repositories are assumed off that. This is only'
+             ' intended to support testing.')
+    add_parser_argument(
         parser, 'github_push_ssh', defaults, True, type=bool,
         help='If False, github push origin uses https rather than ssh.'
              ' Pushes are ssh by default for enhanced security over https.')
@@ -761,11 +766,7 @@ class GitRunner(object):
       logging.warning(
           'SKIP pushing branch because --git_never_push=true.'
           '\nCommand would have been: %s',
-<<<<<<< HEAD:dev/buildtool/git_support.py
-          'hub -C "{dir}" push origin {branch}'.format(
-=======
           'git -C "{dir}" push origin {branch}'.format(
->>>>>>> feat(buildtool): added publish_halyard and publish_spinnaker:dev/buildtool/git_support.py
               dir=git_dir, branch=branch))
       return
 
@@ -773,19 +774,6 @@ class GitRunner(object):
     if in_branch != branch:
       logging.warning('Skipping push %s "%s" to origin because branch is "%s".',
                       git_dir, branch, in_branch)
-<<<<<<< HEAD:dev/buildtool/git_support.py
-      return
-    self.check_run(git_dir, 'push origin ' + branch)
-
-  def push_tag_to_origin(self, git_dir, tag):
-    """Push the given tag back up to the origin."""
-    if self.options.git_never_push:
-      logging.warning(
-          'SKIP pushing tag because --git_never_push=true.'
-          '\nCommand would have been: %s',
-          'hub -C "{dir}" push origin {tag}'.format(dir=git_dir, tag=tag))
-      return
-=======
       return
     self.check_run(git_dir, 'push origin ' + branch)
 
@@ -797,7 +785,6 @@ class GitRunner(object):
           '\nCommand would have been: %s',
           'git -C "{dir}" push origin {tag}'.format(dir=git_dir, tag=tag))
       return
->>>>>>> feat(buildtool): added publish_halyard and publish_spinnaker:dev/buildtool/git_support.py
 
     logging.debug('Pushing tag "%s" and pushing to origin in %s', tag, git_dir)
     self.check_run(git_dir, 'push origin ' + tag)

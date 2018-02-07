@@ -12,40 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import os
 import shutil
 import tempfile
 import unittest
+import yaml
 
 from buildtool import (
     BomSourceCodeManager,
     RepositoryCommandProcessor,
-    RepositoryCommandFactory,
+    RepositoryCommandFactory)
 
-    GitRepositorySpec,
-    RepositorySummary,
-
-    check_subprocess,
-    write_to_path)
-
-from test_util import init_runtime
-
-
-INPUT_DIR = None
-INITIAL_COMMIT = None
-TEST_COMMAND_NAME = 'test_command'
-TEST_SERVICE_NAME = 'testservice'
-TEST_PREFIX = 'testhost/repoowner'
-TEST_BRANCH = 'mybranch'
-TEST_VERSION = '1.2.3'
-TEST_BUILD_VERSION = TEST_VERSION + '-buildnumber'
-TEST_TAG = 'version-1.2.3'
-
-class MinimalOptions(object):
-  def __init__(self, base_dir):
-    self.input_dir = INPUT_DIR
-    self.output_dir = os.path.join(base_dir, 'output')
+from test_util import (
+    make_all_standard_git_repos,
+    init_runtime)
 
 
 class TestBomRepositoryCommand(RepositoryCommandProcessor):
@@ -63,83 +43,94 @@ class TestBomRepositoryCommand(RepositoryCommandProcessor):
 class TestBomRepositoryCommandProcessor(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    global TEST_PREFIX
-    global INPUT_DIR
-    global INITIAL_COMMIT
     cls.base_temp_dir = tempfile.mkdtemp(prefix='bomcmd_test')
-    TEST_PREFIX = os.path.join(cls.base_temp_dir, 'testhost/repowner')
-    INPUT_DIR = os.path.join(cls.base_temp_dir, 'local_sources')
+    cls.repo_commit_map = make_all_standard_git_repos(cls.base_temp_dir)
 
-    test_origin = os.path.join(TEST_PREFIX, TEST_SERVICE_NAME)
-    write_to_path('initial', os.path.join(test_origin, 'hello.txt'))
-    check_subprocess('git init', cwd=test_origin)
-    check_subprocess('git add hello.txt', cwd=test_origin)
-    check_subprocess('git commit -a -m "initial"', cwd=test_origin)
-    INITIAL_COMMIT = check_subprocess('git rev-parse HEAD', cwd=test_origin)
-    check_subprocess('git tag ' + TEST_TAG, cwd=test_origin)
-    write_to_path('changed', os.path.join(test_origin, 'hello.txt'))
-    check_subprocess('git add hello.txt', cwd=test_origin)
-    check_subprocess('git commit -m "changed" hello.txt', cwd=test_origin)
+    source_path = os.path.join(os.path.dirname(__file__),
+                               'standard_test_bom.yml')
+
+    # Adjust the golden bom so it references the details of
+    # the test instance specific origin repo we just created in test_util.
+    with open(source_path, 'r') as stream:
+      cls.golden_bom = yaml.load(stream.read())
+
+      #  Change the bom's default gitPrefix to our origin root
+      cls.golden_bom['artifactSources']['gitPrefix'] = (
+          os.path.dirname(cls.repo_commit_map['normal-test-service']['ORIGIN']))
+
+      #  Change the outlier git repo to its origin root
+      cls.golden_bom['services']['outlier-test-service']['gitPrefix'] = (
+          os.path.dirname(cls.repo_commit_map['outlier-test-repo']['ORIGIN']))
+
+      # Update the service commit id's in the BOM to the actual id's
+      # so we can check them out later.
+      services = cls.golden_bom['services']
+      for name, entry in services.items():
+        if name == 'outlier-test-service':
+          name = 'outlier-test-repo'
+        entry['commit'] = cls.repo_commit_map[name][name + '-branch']
+
+    cls.__bom_path = os.path.join(cls.base_temp_dir, 'test-bom.yml')
+    with open(cls.__bom_path, 'w') as stream:
+      stream.write(yaml.dump(cls.golden_bom))
 
   @classmethod
   def tearDownClass(cls):
     shutil.rmtree(cls.base_temp_dir)
 
-  def test_repository_command(self):
-    bom_path = os.path.join(self.base_temp_dir, 'bom.yml')
-    options = MinimalOptions(self.base_temp_dir)
-    options.command = TEST_COMMAND_NAME
-    options.one_at_a_time = False
-    options.bom_path = bom_path
+  def make_minimal_options(self):
+    class Options(object):
+      pass
+    options = Options()
+    options.github_filesystem_root = self.base_temp_dir
+    options.input_dir = os.path.join(self.base_temp_dir, 'input_dir')
+    options.output_dir = os.path.join(self.base_temp_dir, 'output_dir')
     options.only_repositories = None
     options.github_disable_upstream_push = True
+    options.one_at_a_time = False
+    options.scm_repository_spec_path = os.path.join(
+        os.path.dirname(__file__), 'standard_test_repositories.yml')
+    return options
 
-    # Write a bom
-    with open(bom_path, 'w') as stream:
-      stream.write("""
-          artifactSources:
-             gitBranch: testBranch
-             gitPrefix: {prefix}
-          services:
-             {service}:
-                 commit: {commit}
-                 version: {build_version}
-      """.format(prefix=TEST_PREFIX, service=TEST_SERVICE_NAME,
-                 commit=INITIAL_COMMIT, build_version=TEST_BUILD_VERSION))
+  def test_repository_command(self):
+    options = self.make_minimal_options()
+    options.command = 'test_command'
+    options.bom_path = self.__bom_path
 
-    # Create a command referencing that bom we just wrote.
+    # Create a command referencing our test bom
     # That will learn about our test service through that bom
     factory = RepositoryCommandFactory(
         'TestBomRepositoryCommand', TestBomRepositoryCommand,
         'A test command.', BomSourceCodeManager)
     command = factory.make_command(options)
 
-    # Verify that the repository specs this command uses match the bom
-    self.assertEquals(
-        command.source_repositories,
-        [
-            GitRepositorySpec(
-                TEST_SERVICE_NAME,
-                git_dir=os.path.join(
-                    INPUT_DIR, TEST_COMMAND_NAME, TEST_SERVICE_NAME),
-                origin='%s/%s' % (TEST_PREFIX, TEST_SERVICE_NAME),
-                commit_id=INITIAL_COMMIT)
-        ])
+    for repository in command.source_repositories:
+      self.assertEquals(
+          repository.origin, self.repo_commit_map[repository.name]['ORIGIN'])
+      self.assertEquals(
+          repository.git_dir,
+          os.path.join(os.path.join(self.base_temp_dir, 'input_dir',
+                                    'test_command', repository.name)))
+      self.assertFalse(os.path.exists(repository.git_dir))
 
+    self.assertEquals(set(['normal-test-service', 'outlier-test-repo']),
+                      set([repo.name for repo in command.source_repositories]))
+    self.assertEquals(
+        command.scm.repository_name_to_service_name('normal-test-service'),
+        'normal-test-service')
+    self.assertEquals(
+        command.scm.repository_name_to_service_name('outlier-test-repo'),
+        'outlier-test-service')
 
     # Now run the command and verify it instantiated the working dir
-    # as expected.
+    # a the expected commit.
     command()
-    self.assertEquals(
-        command.summary_info,
-        {
-            TEST_SERVICE_NAME: RepositorySummary(
-                commit_id=INITIAL_COMMIT,
-                tag=TEST_TAG,
-                version=TEST_VERSION,
-                prev_version=TEST_VERSION,
-                commit_messages=[])
-        })
+
+    for repository in command.source_repositories:
+      self.assertTrue(os.path.exists(repository.git_dir))
+      self.assertEquals(
+          command.summary_info[repository.name].commit_id,
+          self.repo_commit_map[repository.name][repository.name + '-branch'])
 
 
 if __name__ == '__main__':

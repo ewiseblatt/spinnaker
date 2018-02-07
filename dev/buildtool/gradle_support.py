@@ -234,14 +234,14 @@ class GradleRunner(object):
     options = self.__options
     exists = []
     missing = []
+
+    # technically we publish to both maven and debian repos.
+    # we can be in a state where we are in one but not the other.
+    # let's not worry about this for now.
     for bintray_repo in [options.bintray_debian_repository]:#,
 #                         options.bintray_jar_repository]:
-      package_name = repository.name
-      if bintray_repo == options.bintray_debian_repository:
-        if package_name == 'spinnaker-monitoring':
-          package_name = 'spinnaker-monitoring-daemon'
-        elif not package_name.startswith('spinnaker'):
-          package_name = 'spinnaker-' + package_name
+      entry = self.__scm.repository_name_to_database_entry(repository.name)
+      package_name = entry.get('debian_package', repository.name)
       if self.bintray_repo_has_version(
           bintray_repo, package_name, repository,
           build_number=build_number):
@@ -299,14 +299,12 @@ class GradleRunner(object):
                         server='bintray.delete'),
           'Failed on url=%s: %s' % (bintray_url, ex.message))
 
-  def check_debian_options(self):
-    """Make sure required options are set for building debian packages."""
-
   def get_common_args(self):
     """Return standard gradle args."""
     options = self.__options
     args = [
         '--stacktrace',
+        '--info',
         '-Prelease.useLastTag=true',
     ]
 
