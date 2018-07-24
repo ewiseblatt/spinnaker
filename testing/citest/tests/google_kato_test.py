@@ -60,7 +60,6 @@ import spinnaker_testing as sk
 import spinnaker_testing.kato as kato
 
 
-
 GCP_STANDARD_IMAGES = {
   'centos-cloud': ['centos-7', 'centos-6'],
   'coreos-cloud': ['coreos-stable', 'coreos-beta', 'coreos-alpha'],
@@ -312,10 +311,10 @@ class GoogleKatoTestScenario(sk.SpinnakerTestScenario):
 
     hc_dict = dict(health_check)
     del hc_dict['requestPath']
-    hc_match = {name: jp.NUM_EQ(value)
+    hc_match = {name: jp.EQUIVALENT(value)
                 for name, value in health_check.items()}
     hc_match['requestPath'] = jp.STR_EQ(path)
-    hc_match['name'] = jp.STR_SUBSTR(self.__use_http_lb_hc_name),
+    hc_match['name'] = jp.STR_SUBSTR(self.__use_http_lb_hc_name)
     builder = gcp.GcpContractBuilder(self.gcp_observer)
     (builder.new_clause_builder('Http Health Check Added')
         .list_resource('httpHealthChecks')
