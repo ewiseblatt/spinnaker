@@ -28,6 +28,7 @@ except ImportError:
 from buildtool import (
     SPINNAKER_BOM_REPOSITORY_NAMES,
     SPINNAKER_GITHUB_IO_REPOSITORY_NAME,
+    SPINNAKER_PROCESS_REPOSITORY_NAMES,
     BomSourceCodeManager,
     BranchSourceCodeManager,
     CommandProcessor,
@@ -49,6 +50,7 @@ from buildtool.changelog_commands import PublishChangelogFactory
 class InitiateReleaseBranchFactory(RepositoryCommandFactory):
   def __init__(self, **kwargs):
     repo_names = list(SPINNAKER_BOM_REPOSITORY_NAMES)
+    repo_names.extend(SPINNAKER_PROCESS_REPOSITORY_NAMES)
     repo_names.append(SPINNAKER_GITHUB_IO_REPOSITORY_NAME)
     super(InitiateReleaseBranchFactory, self).__init__(
         'new_release_branch', InitiateReleaseBranchCommand,
@@ -153,8 +155,12 @@ class PublishSpinnakerCommand(CommandProcessor):
         'min_halyard_version'
     ])
 
+    major, minor, _ = self.options.spinnaker_version.split('.')
+    self.__branch = 'release-{major}.{minor}.x'.format(
+        major=major, minor=minor)
+
     options_copy = copy.copy(options)
-    self.__scm = BomSourceCodeManager(options_copy, self.get_input_dir())
+    self.__bom_scm = BomSourceCodeManager(options_copy, self.get_input_dir())
     self.__hal = HalRunner(options)
     self.__git = GitRunner(options)
     self.__hal.check_property(
@@ -164,11 +170,16 @@ class PublishSpinnakerCommand(CommandProcessor):
     else:
       self.__only_repositories = []
 
+    options_copy.git_branch = self.__branch
+    self.__branch_scm = BranchSourceCodeManager(
+        options_copy, self.get_input_dir())
+
   def push_branches_and_tags(self, bom):
     """Update the release branches and tags in each of the BOM repositires."""
-    major, minor, _ = self.options.spinnaker_version.split('.')
-    branch = 'release-{major}.{minor}.x'.format(major=major, minor=minor)
     logging.info('Tagging each of the BOM service repos')
+
+    bom_scm = self.__bom_scm
+    branch_scm = self.__branch_scm
 
     # Run in two passes so we dont push anything if we hit a problem
     # in the tagging pass. Since we are spread against multiple repositiories,
@@ -189,15 +200,31 @@ class PublishSpinnakerCommand(CommandProcessor):
           logging.warning('HAVE bom.services.%s = None', name)
           continue
 
-        repository = self.__scm.make_repository_spec(name)
-        self.__scm.ensure_local_repository(repository)
+        repository = bom_scm.make_repository_spec(name)
+        bom_scm.ensure_local_repository(repository)
+        version = bom_scm.determine_repository_version(repository)
         if which == 'tag':
-          added = self.__branch_and_tag_repository(repository, branch)
+          added = self.__branch_and_tag_repository(
+              repository, self.__branch, version)
           if added:
             names_to_push.add(name)
         else:
-          self.__push_branch_and_maybe_tag_repository(repository, branch,
-                                                      name in names_to_push)
+          self.__push_branch_and_maybe_tag_repository(
+              repository, self.__branch, version, name in names_to_push)
+
+    additional_repositories = list(SPINNAKER_PROCESS_REPOSITORY_NAMES)
+    for name in additional_repositories:
+      if self.__only_repositories and name not in self.__only_repositories:
+        logging.debug('Skipping %s because of --only_repositories', name)
+        continue
+      repository = branch_scm.make_repository_spec(name)
+      branch_scm.ensure_local_repository(repository)
+      git_summary = self.__git.collect_repository_summary(repository.git_dir)
+      version = git_summary.version
+      if self.__branch_and_tag_repository(
+          repository, self.__branch, version):
+        self.__push_branch_and_maybe_tag_repository(
+            repository, self.__branch, version, True)
 
   def __already_have_tag(self, repository, tag):
     """Determine if we already have the tag in the repository."""
@@ -216,9 +243,8 @@ class PublishSpinnakerCommand(CommandProcessor):
             .format(tag=tag, repo=git_dir,
                     have=existing_commit, want=want_commit)))
 
-  def __branch_and_tag_repository(self, repository, branch):
+  def __branch_and_tag_repository(self, repository, branch, version):
     """Create a branch and/or verison tag in the repository, if needed."""
-    version = self.__scm.determine_repository_version(repository)
     tag = 'version-' + version
     if self.__already_have_tag(repository, tag):
       return False
@@ -226,10 +252,10 @@ class PublishSpinnakerCommand(CommandProcessor):
     self.__git.check_run(repository.git_dir, 'tag ' + tag)
     return True
 
-  def __push_branch_and_maybe_tag_repository(self, repository, branch,
+  def __push_branch_and_maybe_tag_repository(self, repository, branch, version,
                                              also_tag):
     """Push the branch and verison tag to the origin."""
-    tag = 'version-' + self.__scm.determine_repository_version(repository)
+    tag = 'version-' + version
     self.__git.push_branch_to_origin(repository.git_dir, branch)
     if also_tag:
       self.__git.push_tag_to_origin(repository.git_dir, tag)
@@ -252,7 +278,7 @@ class PublishSpinnakerCommand(CommandProcessor):
     try:
       logging.debug('Verifying changelog ready at %s', changelog_gist_url)
       urlopen(changelog_gist_url)
-    except HTTPError as error:
+    except HTTPError:
       logging.error(exception_to_message)
       raise_and_log_error(
           ConfigError(
