@@ -52,6 +52,7 @@ from buildtool import (
     check_options_set,
     check_path_exists,
     ensure_dir_exists,
+    exception_to_message,
     raise_and_log_error,
     write_to_path)
 
@@ -408,7 +409,7 @@ class PublishChangelogCommand(RepositoryCommandProcessor):
           ConfigError(
               u'Changelog gist "{url}": {error}'.format(
                   url=options.changelog_gist_url,
-                  error=error.message)))
+                  error=exception_to_message(error))))
 
   def _do_repository(self, repository):
     if repository.name != SPINNAKER_GITHUB_IO_REPOSITORY_NAME:

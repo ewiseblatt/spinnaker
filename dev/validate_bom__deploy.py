@@ -34,6 +34,7 @@ from buildtool import (
     check_subprocess,
     check_subprocess_sequence,
     check_subprocesses_to_logfile,
+    exception_to_message,
     scan_logs_for_install_errors,
     run_subprocess,
     write_to_path,
@@ -59,7 +60,7 @@ def decode_json(data):
     return json.JSONDecoder().decode(data)
   except (ValueError, TypeError) as err:
     logging.error('Error decoding JSON: %s\n%s\n',
-                  err.message, data)
+                  exception_to_message(err), data)
     raise
 
 
@@ -274,7 +275,7 @@ class BaseValidateBomDeployer(object):
       except Exception as ex:
         message = 'Error fetching log for service "{service}": {ex}'.format(
             service=service, ex=ex)
-        if ex.message.find('No such file') >= 0:
+        if exception_to_message(ex).find('No such file') >= 0:
           message += '\n    Perhaps the service never started.'
           # dont log since the error was already captured.
         else:
@@ -798,10 +799,11 @@ class GenericVmValidateBomDeployer(BaseValidateBomDeployer):
       check_subprocesses_to_logfile('install spinnaker', logfile, [command])
     except ExecutionError as error:
       scan_logs_for_install_errors(logfile)
-      return ExecutionError('Halyard deployment failed: %s' % error.message,
-                            program='install')
+      return ExecutionError(
+          'Halyard deployment failed: %s' % exception_to_message(error),
+          program='install')
     except Exception as ex:
-      return UnexpectedError(ex.message)
+      return UnexpectedError(exception_to_message(ex))
 
     return None
 
@@ -827,8 +829,9 @@ class GenericVmValidateBomDeployer(BaseValidateBomDeployer):
       self.__wait_for_ssh_helper()
     except Exception as ex:
       raise_and_log_error(
-          ExecutionError('Caught "%s" provisioning vm' % ex.message,
-                         program='provisionVm'))
+          ExecutionError(
+              'Caught "%s" provisioning vm' % exception_to_message(ex),
+              program='provisionVm'))
     finally:
       shutil.copyfile(script_path,
                       os.path.join(options.output_dir, 'install-script.sh'))
@@ -847,7 +850,8 @@ class GenericVmValidateBomDeployer(BaseValidateBomDeployer):
       if not error:
         break
 
-      logging.warning('Encountered an error during install: %s', error.message)
+      logging.warning('Encountered an error during install: %s',
+                      exception_to_message(error))
       if retry < (max_retries - 1):
         # Re-upload the files because script may have moved them around
         # so re-running the script wont find them anymore.
@@ -1440,7 +1444,7 @@ class GoogleValidateBomDeployer(GenericVmValidateBomDeployer):
                 network_tags=options.deploy_google_tags,
                 ssh_key=ssh_key,
                 instance=options.deploy_google_instance),
-      stream=sys.stdout)
+        stream=sys.stdout)
 
   def do_undeploy(self):
     """Implements the BaseBomValidateDeployer interface."""
